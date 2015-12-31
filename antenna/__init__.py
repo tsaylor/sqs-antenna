@@ -26,18 +26,18 @@ if you're using [Boto](http://boto.readthedocs.org/) in Python.
     aws_secret_access_key=<secret>
     region=<region>
 
-An easy way to see if everything is working would be to manually add a couple of 
-messages with the [SQS Management Console](https://console.aws.amazon.com/sqs/home), 
+An easy way to see if everything is working would be to manually add a couple of
+messages with the [SQS Management Console](https://console.aws.amazon.com/sqs/home),
 and use `"cat >> log.txt"` as a command.
 
-You can also add messages to the queue from the command line with the 
+You can also add messages to the queue from the command line with the
 [AWS CLI](http://aws.amazon.com/documentation/cli/)
 
     # get your queue's endpoint if you only know its name
     aws sqs get-queue-url --profile my-profile-name --queue-name my-queue | jq '.QueueUrl'
     aws sqs send-message --queue-url my-queue-url --message-body my-message-body
 
-For more information, look at the 
+For more information, look at the
 [AWS CLI documentation for SQS](http://docs.aws.amazon.com/cli/latest/reference/sqs/index.html)
 
 Install Antenna with `pip`, the Python package installer.
@@ -55,36 +55,50 @@ If you're on Ubuntu, you can run Antenna as a daemon by adding it to Upstart:
 
 """
 
+import sys
 import os
-from textwrap import dedent
+import subprocess
+import boto.sqs
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
+
 from docopt import docopt
 
 
-def listen(profile, queue, command):
-    import sys
-    import os
-    import subprocess
-    from StringIO import StringIO
-    import ConfigParser
-    import json
-    import boto.sqs
+def read_config_val(config, name, profile='default'):
+    """Read config values even when no profile section exists."""
+    profile_names = (profile, 'default')
+    if profile.startswith('profile '):
+        profile_names = (profile_names[0], profile[8:], profile_names[1])
+    val = None
+    for profile in profile_names:
+        try:
+            val = config.get(profile, name)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            pass
+        if val != []:
+            return val
+    return None
 
-    # while Boto can read its own configuration just fine, we want Antenna 
+
+def listen(profile, queue, command):
+    # while Boto can read its own configuration just fine, we want Antenna
     # to also work with AWS CLI configuration file
     profile = 'profile ' + profile
-    config = ConfigParser.ConfigParser()
-    config.read(map(os.path.expanduser, ['~/.aws/config', '~/.boto']))
-    region = config.get(profile, 'region')
-    access_key = config.get(profile, 'aws_access_key_id')
-    secret_key = config.get(profile, 'aws_secret_access_key')
+    config = configparser.ConfigParser()
+    config.read(map(os.path.expanduser, ['~/.aws/config', '~/.aws/credentials', '~/.boto']))
+    region = read_config_val(config, 'region', profile=profile)
+    access_key = read_config_val(config, 'aws_access_key_id', profile=profile)
+    secret_key = read_config_val(config, 'aws_secret_access_key', profile=profile)
 
-    sqs = boto.sqs.connect_to_region(region, 
-        aws_access_key_id=access_key, 
-        aws_secret_access_key=secret_key)
+    sqs = boto.sqs.connect_to_region(
+        region, aws_access_key_id=access_key, aws_secret_access_key=secret_key)
 
     queue = sqs.get_queue(queue)
     if not queue:
-        raise ValueError, "Queue does not exist."
+        raise ValueError("Queue does not exist.")
 
     while True:
         messages = queue.get_messages(1, wait_time_seconds=20)
@@ -92,8 +106,8 @@ def listen(profile, queue, command):
         if len(messages):
             message = messages[0]
             body = message.get_body()
-            process = subprocess.Popen([command], stdin=subprocess.PIPE, shell=True)
-            stdout, stderr = process.communicate(body)
+            process = subprocess.Popen([command.encode()], stdin=subprocess.PIPE, shell=True)
+            stdout, stderr = process.communicate(body.encode())
 
             if stdout:
                 sys.stdout.write(stdout)
@@ -111,7 +125,7 @@ def here(*segments):
 def configure(profile, queue, command):
     config = open(here('templates/upstart.conf')).read()
     command = command.replace('"', '\\"')
-    print config.format(**locals())
+    print(config.format(**locals()))
 
 
 def extract(d, whitelist=None):
