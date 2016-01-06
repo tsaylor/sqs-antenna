@@ -78,7 +78,7 @@ def read_config_val(config, name, profile='default'):
             val = config.get(profile, name)
         except (configparser.NoSectionError, configparser.NoOptionError):
             pass
-        if val != []:
+        if val is not None and val != []:
             return val
     return None
 
